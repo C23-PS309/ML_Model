@@ -9,6 +9,14 @@ import matplotlib.pyplot as plt
 from imutils import perspective
 from imutils import contours
 from scipy.spatial import distance as dist
+import tensorflow as tf
+import mediapipe as mp
+import math
+
+draw_line = mp.solutions.drawing_utils
+mp_pose = mp.solutions.pose
+pose_est = mp_pose.Pose(static_image_mode=False, min_detection_confidence=0.5, min_tracking_confidence=0.5)
+
 
 def create_dir(file_path) :
     if not os.path.exists(file_path):
@@ -67,7 +75,7 @@ def get_Contour(masked_img):
         lst_count.append([index,cv2.contourArea(contour)])
     lst_count.sort(key=lambda lst_count: lst_count[1], reverse=True)
     cnts = cnts[lst_count[0][0]]
-    return cnts
+    return cnts, lst_count
 
 
 def midpoint(fromP, toP):
@@ -75,7 +83,7 @@ def midpoint(fromP, toP):
 
 
 def get_Sckeleton(img,masked_img):
-    cnts = get_Contour(masked_img)#edged = get_Edged(masked_img)
+    cnts, list = get_Contour(masked_img)#edged = get_Edged(masked_img)
     imgc = img.copy()
     box = cv2.minAreaRect(cnts) ##deteksi kotak terkecil yang melingkupi kontur
     x, y, w, h = cv2.boundingRect(cnts) ##get bounding box melingkupi kontur
@@ -103,21 +111,20 @@ def get_Sckeleton(img,masked_img):
     cv2.line(imgc, (int(TLBLx), int(TLBLy)), (int(TRBRx), int(TRBRy)),(255, 0, 255), 2)
     # plt.subplot(1,3,3)
     # plt.imshow(imgc)
-    return box
+    return imgc, box
 
 def get_Measurement(img, height) :
     img_ok = img.copy()
     masked_img = generate_Mask(img)
     face = find_Face(masked_img)
-    contour = get_Contour(masked_img)
+    contour,list_c = get_Contour(masked_img)
     x,y,w,h = cv2.boundingRect(contour)
+
     box = [[x,y],[x, y+h],[x+w,y+h],[x+w,y]]
-    # new_box = np.array(box,dtype=int)
     x,y,w,h = face    ##create face point 
     cv2.rectangle(img_ok,(x,y),(x+w,y+h),(0,0,250),2)
     face_points_box = [[x,y],[x, y+h],[x+w,y+h],[x+w,y]]
     face = np.array(face_points_box,dtype=int)
-
     (TL, BL, BR, TR) = box
     (TRx,TRy) = TR
     (BRx,BRy) = BR
@@ -127,45 +134,60 @@ def get_Measurement(img, height) :
     (BLBRx, BLBRy) = midpoint(BL, BR)
     (TLBLx, TLBLy) = midpoint(TL,BL)
     (TRBRx, TRBRy) = midpoint(TR,BR)
-    # left_center_x = (dist.euclidean(TL[0],BL[0]))/2
-    left_center_x = (TL[0] + BL[0])/2
-    right_center_x = (TR[0] + BR[0])/2 
-    # blue = (42, 90, 118)
-    blue = (20, 40, 60)
-    green = (44, 84, 62)
-    white = (255,255,255)
-
-    cv2.circle(img_ok,(int(TLTRx), int(TLTRy)), 5, blue, -1)
-    cv2.circle(img_ok, (int(BLBRx), int(BLBRy)), 5, blue, -1)
-    cv2.line(img_ok, (int(TLTRx), int(TLTRy)), (int(TLx-10), int(TLy)),blue, 1)
-    cv2.line(img_ok, (int(BLBRx), int(BLBRy)), (int(BLx-10), int(BLy)),blue, 1)  
-    cv2.line(img_ok, (int(TLx-10), int(TLy)), (int(BLx-10), int(BLy)),blue, 1)  
 
     #estimasi tinggi dan lebar
     est_h = dist.euclidean ((TLTRx,TLTRy), (BLBRx, BLBRy))
     est_w = dist.euclidean ((TLBLx, TLBLy), (TRBRx, TRBRy))
-    # est_chest = dist.euclidean(TRx,TLx)
-    # est_hip = dist.euclidean(BRx,BLx)
-
+    est_s = get_shoulder(img_ok)
+    est_hp = get_hip(img_ok)
+    est_px = pixel_per_met_md(img_ok,height)
     pixelMetric = est_h/float(height)
-    #size object
     final_h = est_h/pixelMetric
-    final_w = est_w/pixelMetric
-    final_chest = abs(TRx - TLx)/pixelMetric
-    final_hip = abs(BRx - BLx)/pixelMetric
-    final_waist = abs(right_center_x - left_center_x)/pixelMetric
-
-    cv2.putText(masked_img,"{:.1f}".format(final_h),(int(TLx-80),int(TLy+200)),cv2.FONT_HERSHEY_SIMPLEX,0.7,white,2)
-    # cv2.putText(masked_img,"{:.1f}".format(final_w),(int(TRx),int(TRy)),cv2.FONT_HERSHEY_SIMPLEX,0.7,white,2)
-    cv2.putText(masked_img,"cm",(int(TLx-55),int(TLy+220)),cv2.FONT_HERSHEY_SIMPLEX,0.7,white,2)
-    # cv2.putText(masked_img,"cm",(int(TRx),int(TRy)),cv2.FONT_HERSHEY_SIMPLEX,0.7,white,2)
-
+    final_w = round(est_w/pixelMetric,1)
+    final_s = round(est_s * est_px,1)
+    final_hp = round(est_hp * est_px,1)
     img_final = cv2.cvtColor(masked_img,cv2.COLOR_BGR2RGB)
-    # plt.imshow(img_final)
-    # return img_final, pixelMetric
-    return final_h,final_chest,final_hip,final_waist
+    return final_h, final_w, final_s, final_hp
 
-    # return final_h, final_w
+def pose_detect(img):
+    res = pose_est.process(img)
+    landmarks = res.pose_landmarks
+    annotated_image = img.copy()
+    draw_line.draw_landmarks(
+    annotated_image, res.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+    if (landmarks.landmark[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER].visibility > 0.5 
+    and landmarks.landmark[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER].visibility > 0.5):
+        return landmarks, annotated_image
+    else:
+        return("Can't detect landmarks")
+    
+def get_hip(image) :
+    landmark_est, anno = pose_detect(image)
+    left_hip = (landmark_est.landmark[mp.solutions.pose.PoseLandmark.LEFT_HIP].x,
+              landmark_est.landmark[mp.solutions.pose.PoseLandmark.LEFT_HIP].y)
+    right_hip = (landmark_est.landmark[mp.solutions.pose.PoseLandmark.RIGHT_HIP].x,
+               landmark_est.landmark[mp.solutions.pose.PoseLandmark.RIGHT_HIP].y)
+    hip_est = math.sqrt((right_hip[0] - left_hip[0])**2 + (right_hip[1] - left_hip[1])**2)
+    return hip_est
+
+def get_shoulder(image) :
+    landmark_est, anno = pose_detect(image)
+    left_shoulder = (landmark_est.landmark[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER].x,
+                 landmark_est.landmark[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER].y)
+    right_shoulder = (landmark_est.landmark[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER].x,
+                  landmark_est.landmark[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER].y)
+    shoulder_est = math.sqrt((right_shoulder[0] - left_shoulder[0])**2 + (right_shoulder[1] - left_shoulder[1])**2) 
+    return shoulder_est
+
+def pixel_per_met_md(img,h) :
+    landmark_est, anno = pose_detect(img)
+    point0 = landmark_est.landmark[mp.solutions.pose.PoseLandmark.NOSE]
+    point28 = landmark_est.landmark[mp.solutions.pose.PoseLandmark.RIGHT_ANKLE]
+    length = ((point0.x - point28.x) ** 2 + (point0.y - point28.y) ** 2) ** 0.5
+    px = h/length
+    return px
+
+
 
 
 
