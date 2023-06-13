@@ -114,40 +114,46 @@ def get_Sckeleton(img,masked_img):
     return imgc, box
 
 def get_Measurement(img, height) :
-    img_ok = img.copy()
-    masked_img = generate_Mask(img)
-    face = find_Face(masked_img)
-    contour,list_c = get_Contour(masked_img)
-    x,y,w,h = cv2.boundingRect(contour)
+    try :
+        img_ok = img.copy()
+        masked_img = generate_Mask(img)
+        face = find_Face(masked_img)
+        contour,list_c = get_Contour(masked_img)
+        x,y,w,h = cv2.boundingRect(contour)
 
-    box = [[x,y],[x, y+h],[x+w,y+h],[x+w,y]]
-    x,y,w,h = face    ##create face point 
-    cv2.rectangle(img_ok,(x,y),(x+w,y+h),(0,0,250),2)
-    face_points_box = [[x,y],[x, y+h],[x+w,y+h],[x+w,y]]
-    face = np.array(face_points_box,dtype=int)
-    (TL, BL, BR, TR) = box
-    (TRx,TRy) = TR
-    (BRx,BRy) = BR
-    (TLx,TLy) = TL
-    (BLx,BLy) = BL
-    (TLTRx, TLTRy) = midpoint(TL, TR)
-    (BLBRx, BLBRy) = midpoint(BL, BR)
-    (TLBLx, TLBLy) = midpoint(TL,BL)
-    (TRBRx, TRBRy) = midpoint(TR,BR)
+        box = [[x,y],[x, y+h],[x+w,y+h],[x+w,y]]
+        x,y,w,h = face    ##create face point 
+        cv2.rectangle(img_ok,(x,y),(x+w,y+h),(0,0,250),2)
+        face_points_box = [[x,y],[x, y+h],[x+w,y+h],[x+w,y]]
+        face = np.array(face_points_box,dtype=int)
+        (TL, BL, BR, TR) = box
+        (TRx,TRy) = TR
+        (BRx,BRy) = BR
+        (TLx,TLy) = TL
+        (BLx,BLy) = BL
+        (TLTRx, TLTRy) = midpoint(TL, TR)
+        (BLBRx, BLBRy) = midpoint(BL, BR)
+        (TLBLx, TLBLy) = midpoint(TL,BL)
+        (TRBRx, TRBRy) = midpoint(TR,BR)
 
     #estimasi tinggi dan lebar
-    est_h = dist.euclidean ((TLTRx,TLTRy), (BLBRx, BLBRy))
-    est_w = dist.euclidean ((TLBLx, TLBLy), (TRBRx, TRBRy))
-    est_s = get_shoulder(img_ok)
-    est_hp = get_hip(img_ok)
-    est_px = pixel_per_met_md(img_ok,height)
-    pixelMetric = est_h/float(height)
-    final_h = est_h/pixelMetric
-    final_w = round(est_w/pixelMetric,1)
-    final_s = round(est_s * est_px,1)
-    final_hp = round(est_hp * est_px,1)
-    img_final = cv2.cvtColor(masked_img,cv2.COLOR_BGR2RGB)
-    return final_h, final_w, final_s, final_hp
+        est_h = dist.euclidean ((TLTRx,TLTRy), (BLBRx, BLBRy))
+        est_w = dist.euclidean ((TLBLx, TLBLy), (TRBRx, TRBRy))
+        est_s = get_shoulder(img_ok)
+        est_hp = get_hip(img_ok)
+        est_px = pixel_per_met_md(img_ok,height)
+        pixelMetric = est_h/float(height)
+        final_h = est_h/pixelMetric
+        if pose_detect(img) != "Invalid Image" :
+            final_w = round(est_w/pixelMetric,1)
+            # final_s = round(est_s*est_px,1)
+            final_hp = round(est_hp*est_px,1)
+        # img_final = cv2.cvtColor(masked_img,cv2.COLOR_BGR2RGB)
+            return final_h, final_w, final_hp
+        else :
+            return None, None, None, None
+    except ValueError :
+        return None, None, None, None 
 
 def pose_detect(img):
     res = pose_est.process(img)
@@ -155,37 +161,60 @@ def pose_detect(img):
     annotated_image = img.copy()
     draw_line.draw_landmarks(
     annotated_image, res.pose_landmarks, mp_pose.POSE_CONNECTIONS)
-    if (landmarks.landmark[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER].visibility > 0.5 
-    and landmarks.landmark[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER].visibility > 0.5):
-        return landmarks, annotated_image
+    if (landmarks.landmark[mp.solutions.pose.PoseLandmark.LEFT_ANKLE].visibility > 0.01
+    and landmarks.landmark[mp.solutions.pose.PoseLandmark.RIGHT_ANKLE].visibility > 0.01):
+        return landmarks
     else:
-        return("Can't detect landmarks")
+        return("Invalid Image")
+
     
 def get_hip(image) :
-    landmark_est, anno = pose_detect(image)
-    left_hip = (landmark_est.landmark[mp.solutions.pose.PoseLandmark.LEFT_HIP].x,
+    try :
+        landmark_est = pose_detect(image)
+        if landmark_est != 'Invalid Image' :
+            h,w, _ = image.shape
+            left_hip = (landmark_est.landmark[mp.solutions.pose.PoseLandmark.LEFT_HIP].x,
               landmark_est.landmark[mp.solutions.pose.PoseLandmark.LEFT_HIP].y)
-    right_hip = (landmark_est.landmark[mp.solutions.pose.PoseLandmark.RIGHT_HIP].x,
+            right_hip = (landmark_est.landmark[mp.solutions.pose.PoseLandmark.RIGHT_HIP].x,
                landmark_est.landmark[mp.solutions.pose.PoseLandmark.RIGHT_HIP].y)
-    hip_est = math.sqrt((right_hip[0] - left_hip[0])**2 + (right_hip[1] - left_hip[1])**2)
-    return hip_est
+            # x_left_hip = int(left_hip[0] * w)
+            # y_left_hip = int(left_hip[1] * h)
+            # x_right_hip = int(right_hip[0] * w)
+            # y_right_hip = int(right_hip[1] * h)
+            hip_est = math.sqrt((right_hip[0] - left_hip[0])**2 + (right_hip[1] - left_hip[1])**2)
+            return hip_est
+    except ValueError :
+        return 'Invalid Image'
 
 def get_shoulder(image) :
-    landmark_est, anno = pose_detect(image)
-    left_shoulder = (landmark_est.landmark[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER].x,
+    try :
+        landmark_est = pose_detect(image)
+        if landmark_est != 'Invalid Image' :
+            h,w, _ = image.shape
+            left_shoulder = (landmark_est.landmark[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER].x,
                  landmark_est.landmark[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER].y)
-    right_shoulder = (landmark_est.landmark[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER].x,
+            right_shoulder = (landmark_est.landmark[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER].x,
                   landmark_est.landmark[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER].y)
-    shoulder_est = math.sqrt((right_shoulder[0] - left_shoulder[0])**2 + (right_shoulder[1] - left_shoulder[1])**2) 
-    return shoulder_est
+            # x_left_shoulder = int(left_shoulder[0] * w)
+            # y_left_shoulder = int(left_shoulder[1] * h)
+            # x_right_shoulder = int(right_shoulder[0] * w)
+            # y_right_shoulder = int(right_shoulder[1] * h)
+            shoulder_est = shoulder_est = math.sqrt((right_shoulder[0] - left_shoulder[0])**2 + (right_shoulder[1] - left_shoulder[1])**2) 
+            return shoulder_est
+    except ValueError :
+        return 'Invalid Image'
 
 def pixel_per_met_md(img,h) :
-    landmark_est, anno = pose_detect(img)
-    point0 = landmark_est.landmark[mp.solutions.pose.PoseLandmark.NOSE]
-    point28 = landmark_est.landmark[mp.solutions.pose.PoseLandmark.RIGHT_ANKLE]
-    length = ((point0.x - point28.x) ** 2 + (point0.y - point28.y) ** 2) ** 0.5
-    px = h/length
-    return px
+    try : 
+        landmark_est= pose_detect(img)
+        if landmark_est != 'Invalid Image' :
+            point0 = landmark_est.landmark[mp.solutions.pose.PoseLandmark.NOSE]
+            point28 = landmark_est.landmark[mp.solutions.pose.PoseLandmark.RIGHT_ANKLE]
+            length = ((point0.x - point28.x) ** 2 + (point0.y - point28.y) ** 2) ** 0.5
+            px = h/length
+            return px
+    except ValueError :
+        return 'Invalid Image'
 
 
 
