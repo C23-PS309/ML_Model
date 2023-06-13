@@ -7,4 +7,6 @@ Model yang digunkan untuk prediksi size baju adalah model regresi softmax yang m
 source :
 https://ieeexplore.ieee.org/document/9763292
 
+**Untuk menjalankan program dengan instan, anda dapat menggunakan file demo
+
 
